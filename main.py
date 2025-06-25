@@ -1,3 +1,4 @@
+import _thread
 import settings
 from machine import Pin, PWM, ADC
 from time import sleep_ms
@@ -60,22 +61,24 @@ def read_wpm():
     wpm_avg.update(n)
     return linear_scale(wpm_avg.average(), 0, 65535, settings.WPM_MIN, settings.WPM_MAX)
 
-def loop(c):
-    if c % 100 == 0:
+def ui_thread():
+    while True:
         buzzer.frequency = read_pitch()
         keyer.wpm = read_wpm()
         print(buzzer.frequency, keyer.wpm)
+        sleep_ms(100)
 
+def loop():
     keyer.handler(not dit_pin.value(), not dah_pin.value())
+    sleep_ms(1)
 
 def main():
     setup()
 
-    c = 0
+    _thread.start_new_thread(ui_thread, ())
+
     while True:
-        loop(c)
-        c += 1
-        sleep_ms(1)
+        loop()
 
 if __name__ == "__main__":
     main()
