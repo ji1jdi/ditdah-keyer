@@ -1,6 +1,7 @@
 import _thread
 import settings
-from machine import Pin, PWM, ADC
+import ssd1306
+from machine import Pin, PWM, ADC, I2C
 from time import sleep_ms
 from keyer import Keyer
 from keyout import KeyOut
@@ -31,6 +32,9 @@ wpm_pin   = ADC(settings.WPM_PIN)
 pitch_avg = MovingAverage(settings.MOVING_AVERAGE_SIZE)
 wpm_avg   = MovingAverage(settings.MOVING_AVERAGE_SIZE)
 
+i2c = I2C(0, sda=Pin(settings.OLED_SDA_PIN), scl=Pin(settings.OLED_SCL_PIN))
+oled = ssd1306.SSD1306_I2C(settings.OLED_WIDTH, settings.OLED_HEIGHT, i2c)
+
 def setup():
     setup_adc()
 
@@ -43,6 +47,12 @@ def setup_adc():
         wpm_avg.update(n)
 
         sleep_ms(1)
+
+def display(oled, pitch, wpm):
+    oled.fill(0)
+    oled.text("DitDah Keyer", 0, 0)
+    oled.text(f"{pitch}Hz {wpm}WPM", 0, 16)
+    oled.show()
 
 def linear_scale(x, x_min, x_max, y_min, y_max):
     return round((x - x_min) / (x_max - x_min) * (y_max - y_min) + y_min)
@@ -65,7 +75,10 @@ def ui_thread():
     while True:
         buzzer.frequency = read_pitch()
         keyer.wpm = read_wpm()
+
         print(buzzer.frequency, keyer.wpm)
+        display(oled, buzzer.frequency, keyer.wpm)
+
         sleep_ms(100)
 
 def loop():
