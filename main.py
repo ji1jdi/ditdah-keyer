@@ -2,8 +2,10 @@ import _thread
 import settings
 import ssd1306
 from machine import Pin, PWM, ADC, I2C
-from time import sleep_ms
+from time import sleep_ms, ticks_ms, ticks_diff
 from keyer import Keyer
+from iambic_keyer import IambicKeyer
+from manual_keyer import ManualKeyer
 from keyout import KeyOut
 from emitter import Emitter
 from buzzer import Buzzer
@@ -11,6 +13,8 @@ from moving_average import MovingAverage
 
 dit_pin = Pin(settings.DIT_PIN, Pin.IN, Pin.PULL_UP)
 dah_pin = Pin(settings.DAH_PIN, Pin.IN, Pin.PULL_UP)
+
+key_type_pin = Pin(settings.KEY_TYPE_PIN, Pin.IN, Pin.PULL_UP)
 
 keyout = KeyOut(Pin(settings.KEYOUT_PIN, Pin.OUT))
 
@@ -23,8 +27,13 @@ emitter.on("off", buzzer.off)
 emitter.on("on", keyout.on)
 emitter.on("off", keyout.off)
 
-keyer = Keyer(emitter)
-keyer.wpm = settings.WPM_DEFAULT
+iambic_keyer = IambicKeyer(emitter)
+iambic_keyer.wpm = settings.WPM_DEFAULT
+
+manual_keyer = ManualKeyer(emitter)
+
+keyer_list = [iambic_keyer, manual_keyer]
+keyer = iambic_keyer
 
 pitch_pin = ADC(settings.PITCH_PIN)
 wpm_pin   = ADC(settings.WPM_PIN)
@@ -37,6 +46,7 @@ oled = ssd1306.SSD1306_I2C(settings.OLED_WIDTH, settings.OLED_HEIGHT, i2c)
 
 def setup():
     setup_adc()
+    setup_keyer(key_type_pin)
 
 def setup_adc():
     for i in range(settings.MOVING_AVERAGE_SIZE):
@@ -48,11 +58,36 @@ def setup_adc():
 
         sleep_ms(1)
 
-def display(oled, pitch, wpm):
+def setup_keyer(pin):
+    keyer_type = Keyer.IAMBIC
+    last_update = 0
+
+    def handler(pin):
+        global keyer
+        nonlocal keyer_type, last_update
+
+        now = ticks_ms()
+        if ticks_diff(now, last_update) > 200:
+            keyer_type = (keyer_type + 1) % Keyer.NUM_KEYERS
+        last_update = now
+        print(keyer_type)
+
+        keyer = keyer_list[keyer_type]
+
+    pin.irq(trigger=Pin.IRQ_FALLING, handler=handler)
+
+def display(oled, keyer_type, pitch, wpm):
+    keyer = "Iambic key" if keyer_type == Keyer.IAMBIC else "Manual key"
+    speed = "-" if keyer_type == Keyer.MANUAL else wpm
+
     oled.fill(0)
     oled.text("DitDah Keyer", 0, 0)
-    oled.text(f"{pitch}Hz {wpm}WPM", 0, 16)
+    oled.text(f"{keyer}", 0, 16)
+    oled.text(f"{pitch}Hz {speed}WPM", 0, 32)
     oled.show()
+
+    print(keyer, pitch, wpm)
+
 
 def linear_scale(x, x_min, x_max, y_min, y_max):
     return round((x - x_min) / (x_max - x_min) * (y_max - y_min) + y_min)
@@ -76,8 +111,7 @@ def ui_thread():
         buzzer.frequency = read_pitch()
         keyer.wpm = read_wpm()
 
-        print(buzzer.frequency, keyer.wpm)
-        display(oled, buzzer.frequency, keyer.wpm)
+        display(oled, keyer.type, buzzer.frequency, keyer.wpm)
 
         sleep_ms(100)
 
